@@ -100,12 +100,15 @@ lws_ws_handshake_client(struct lws *wsi, unsigned char **buf, size_t len)
 #endif
 		/* caller will account for buflist usage */
 
-		if (lws_ws_client_rx_sm(wsi, *(*buf)++)) {
-			lwsl_notice("%s: client_rx_sm exited, DROPPING %d\n",
-				    __func__, (int)len);
-			return -1;
-		}
-		len--;
+        int res = lws_ws_client_rx_sm(wsi, *buf, len);
+        if (res == -1) {
+            lwsl_notice("%s: client_rx_sm exited, DROPPING %d\n",
+                        __func__, (int)len);
+            return -1;
+        }
+
+        *buf += res;
+        len -= res;
 	}
 	// lwsl_notice("%s: finished with %ld\n", __func__, (long)len);
 

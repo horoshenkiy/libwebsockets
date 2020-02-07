@@ -21,12 +21,14 @@
 
 #include "core/private.h"
 
+#define MIN(a,b) (((a)<(b))?(a):(b))
+
 /*
  * parsers.c: lws_ws_rx_sm() needs to be roughly kept in
  *   sync with changes here, esp related to ext draining
  */
 
-int lws_ws_client_rx_sm(struct lws *wsi, unsigned char c)
+int lws_ws_client_rx_sm(struct lws *wsi, unsigned char *buf, size_t len)
 {
 	int callback_action = LWS_CALLBACK_CLIENT_RECEIVE;
 	int handled, m;
@@ -37,12 +39,13 @@ int lws_ws_client_rx_sm(struct lws *wsi, unsigned char c)
 	int rx_draining_ext = 0, n;
 #endif
 
+	int parsed = 1;
 	ebuf.token = NULL;
 	ebuf.len = 0;
 
 #if !defined(LWS_WITHOUT_EXTENSIONS)
 	if (wsi->ws->rx_draining_ext) {
-		assert(!c);
+		assert(!*buf);
 
 		lws_remove_wsi_from_draining_ext_list(wsi);
 		rx_draining_ext = 1;
@@ -62,11 +65,11 @@ int lws_ws_client_rx_sm(struct lws *wsi, unsigned char c)
 
 		switch (wsi->ws->ietf_spec_revision) {
 		case 13:
-			wsi->ws->opcode = c & 0xf;
+			wsi->ws->opcode = *buf & 0xf;
 			/* revisit if an extension wants them... */
 			switch (wsi->ws->opcode) {
 			case LWSWSOPC_TEXT_FRAME:
-				wsi->ws->rsv_first_msg = (c & 0x70);
+				wsi->ws->rsv_first_msg = (*buf & 0x70);
 				wsi->ws->continuation_possible = 1;
 				wsi->ws->check_utf8 = lws_check_opt(
 					wsi->context->options,
@@ -75,7 +78,7 @@ int lws_ws_client_rx_sm(struct lws *wsi, unsigned char c)
 				wsi->ws->first_fragment = 1;
 				break;
 			case LWSWSOPC_BINARY_FRAME:
-				wsi->ws->rsv_first_msg = (c & 0x70);
+				wsi->ws->rsv_first_msg = (*buf & 0x70);
 				wsi->ws->check_utf8 = 0;
 				wsi->ws->continuation_possible = 1;
 				wsi->ws->first_fragment = 1;
@@ -107,7 +110,7 @@ int lws_ws_client_rx_sm(struct lws *wsi, unsigned char c)
 				wsi->ws->defeat_check_utf8 = 1;
 				break;
 			}
-			wsi->ws->rsv = (c & 0x70);
+			wsi->ws->rsv = (*buf & 0x70);
 			/* revisit if an extension wants them... */
 			if (
 #if !defined(LWS_WITHOUT_EXTENSIONS)
@@ -117,7 +120,7 @@ int lws_ws_client_rx_sm(struct lws *wsi, unsigned char c)
 				lwsl_info("illegal rsv bits set\n");
 				return -1;
 			}
-			wsi->ws->final = !!((c >> 7) & 1);
+			wsi->ws->final = !!((*buf >> 7) & 1);
 			lwsl_ext("%s:    This RX frame Final %d\n", __func__,
 				 wsi->ws->final);
 
@@ -158,9 +161,9 @@ int lws_ws_client_rx_sm(struct lws *wsi, unsigned char c)
 
 	case LWS_RXPS_04_FRAME_HDR_LEN:
 
-		wsi->ws->this_frame_masked = !!(c & 0x80);
+		wsi->ws->this_frame_masked = !!(*buf & 0x80);
 
-		switch (c & 0x7f) {
+		switch (*buf & 0x7f) {
 		case 126:
 			/* control frames are not allowed to have big lengths */
 			if (wsi->ws->opcode & 8)
@@ -174,7 +177,7 @@ int lws_ws_client_rx_sm(struct lws *wsi, unsigned char c)
 			wsi->lws_rx_parse_state = LWS_RXPS_04_FRAME_HDR_LEN64_8;
 			break;
 		default:
-			wsi->ws->rx_packet_length = c & 0x7f;
+			wsi->ws->rx_packet_length = *buf & 0x7f;
 			if (wsi->ws->this_frame_masked)
 				wsi->lws_rx_parse_state =
 						LWS_RXPS_07_COLLECT_FRAME_KEY_1;
@@ -192,12 +195,12 @@ int lws_ws_client_rx_sm(struct lws *wsi, unsigned char c)
 		break;
 
 	case LWS_RXPS_04_FRAME_HDR_LEN16_2:
-		wsi->ws->rx_packet_length = c << 8;
+		wsi->ws->rx_packet_length = *buf << 8;
 		wsi->lws_rx_parse_state = LWS_RXPS_04_FRAME_HDR_LEN16_1;
 		break;
 
 	case LWS_RXPS_04_FRAME_HDR_LEN16_1:
-		wsi->ws->rx_packet_length |= c;
+		wsi->ws->rx_packet_length |= *buf;
 		if (wsi->ws->this_frame_masked)
 			wsi->lws_rx_parse_state = LWS_RXPS_07_COLLECT_FRAME_KEY_1;
 		else {
@@ -212,13 +215,13 @@ int lws_ws_client_rx_sm(struct lws *wsi, unsigned char c)
 		break;
 
 	case LWS_RXPS_04_FRAME_HDR_LEN64_8:
-		if (c & 0x80) {
+		if (*buf & 0x80) {
 			lwsl_warn("b63 of length must be zero\n");
 			/* kill the connection */
 			return -1;
 		}
 #if defined __LP64__
-		wsi->ws->rx_packet_length = ((size_t)c) << 56;
+		wsi->ws->rx_packet_length = ((size_t)*buf) << 56;
 #else
 		wsi->ws->rx_packet_length = 0;
 #endif
@@ -227,42 +230,42 @@ int lws_ws_client_rx_sm(struct lws *wsi, unsigned char c)
 
 	case LWS_RXPS_04_FRAME_HDR_LEN64_7:
 #if defined __LP64__
-		wsi->ws->rx_packet_length |= ((size_t)c) << 48;
+		wsi->ws->rx_packet_length |= ((size_t)*buf) << 48;
 #endif
 		wsi->lws_rx_parse_state = LWS_RXPS_04_FRAME_HDR_LEN64_6;
 		break;
 
 	case LWS_RXPS_04_FRAME_HDR_LEN64_6:
 #if defined __LP64__
-		wsi->ws->rx_packet_length |= ((size_t)c) << 40;
+		wsi->ws->rx_packet_length |= ((size_t)*buf) << 40;
 #endif
 		wsi->lws_rx_parse_state = LWS_RXPS_04_FRAME_HDR_LEN64_5;
 		break;
 
 	case LWS_RXPS_04_FRAME_HDR_LEN64_5:
 #if defined __LP64__
-		wsi->ws->rx_packet_length |= ((size_t)c) << 32;
+		wsi->ws->rx_packet_length |= ((size_t)*buf) << 32;
 #endif
 		wsi->lws_rx_parse_state = LWS_RXPS_04_FRAME_HDR_LEN64_4;
 		break;
 
 	case LWS_RXPS_04_FRAME_HDR_LEN64_4:
-		wsi->ws->rx_packet_length |= ((size_t)c) << 24;
+		wsi->ws->rx_packet_length |= ((size_t)*buf) << 24;
 		wsi->lws_rx_parse_state = LWS_RXPS_04_FRAME_HDR_LEN64_3;
 		break;
 
 	case LWS_RXPS_04_FRAME_HDR_LEN64_3:
-		wsi->ws->rx_packet_length |= ((size_t)c) << 16;
+		wsi->ws->rx_packet_length |= ((size_t)*buf) << 16;
 		wsi->lws_rx_parse_state = LWS_RXPS_04_FRAME_HDR_LEN64_2;
 		break;
 
 	case LWS_RXPS_04_FRAME_HDR_LEN64_2:
-		wsi->ws->rx_packet_length |= ((size_t)c) << 8;
+		wsi->ws->rx_packet_length |= ((size_t)*buf) << 8;
 		wsi->lws_rx_parse_state = LWS_RXPS_04_FRAME_HDR_LEN64_1;
 		break;
 
 	case LWS_RXPS_04_FRAME_HDR_LEN64_1:
-		wsi->ws->rx_packet_length |= (size_t)c;
+		wsi->ws->rx_packet_length |= (size_t)*buf;
 		if (wsi->ws->this_frame_masked)
 			wsi->lws_rx_parse_state =
 					LWS_RXPS_07_COLLECT_FRAME_KEY_1;
@@ -278,29 +281,29 @@ int lws_ws_client_rx_sm(struct lws *wsi, unsigned char c)
 		break;
 
 	case LWS_RXPS_07_COLLECT_FRAME_KEY_1:
-		wsi->ws->mask[0] = c;
-		if (c)
+		wsi->ws->mask[0] = *buf;
+		if (*buf)
 			wsi->ws->all_zero_nonce = 0;
 		wsi->lws_rx_parse_state = LWS_RXPS_07_COLLECT_FRAME_KEY_2;
 		break;
 
 	case LWS_RXPS_07_COLLECT_FRAME_KEY_2:
-		wsi->ws->mask[1] = c;
-		if (c)
+		wsi->ws->mask[1] = *buf;
+		if (*buf)
 			wsi->ws->all_zero_nonce = 0;
 		wsi->lws_rx_parse_state = LWS_RXPS_07_COLLECT_FRAME_KEY_3;
 		break;
 
 	case LWS_RXPS_07_COLLECT_FRAME_KEY_3:
-		wsi->ws->mask[2] = c;
-		if (c)
+		wsi->ws->mask[2] = *buf;
+		if (*buf)
 			wsi->ws->all_zero_nonce = 0;
 		wsi->lws_rx_parse_state = LWS_RXPS_07_COLLECT_FRAME_KEY_4;
 		break;
 
 	case LWS_RXPS_07_COLLECT_FRAME_KEY_4:
-		wsi->ws->mask[3] = c;
-		if (c)
+		wsi->ws->mask[3] = *buf;
+		if (*buf)
 			wsi->ws->all_zero_nonce = 0;
 
 		if (wsi->ws->rx_packet_length)
@@ -319,28 +322,47 @@ int lws_ws_client_rx_sm(struct lws *wsi, unsigned char c)
 		if (wsi->ws->rx_draining_ext)
 			goto drain_extension;
 #endif
-		if (wsi->ws->this_frame_masked && !wsi->ws->all_zero_nonce)
-			c ^= wsi->ws->mask[(wsi->ws->mask_idx++) & 3];
 
-		wsi->ws->rx_ubuf[LWS_PRE + (wsi->ws->rx_ubuf_head++)] = c;
+		/* bulk read */
+		if (wsi->ws->rx_packet_length <= len &&
+				(wsi->ws->opcode == LWSWSOPC_TEXT_FRAME ||
+				 wsi->ws->opcode == LWSWSOPC_BINARY_FRAME ||
+				 wsi->ws->opcode == LWSWSOPC_CONTINUATION)) {
+
+			parsed = wsi->ws->rx_packet_length;
+			wsi->ws->rx_packet_length = 0;
+			ebuf.token = (char *) buf;
+			ebuf.len = parsed;
+
+		} else {
+			parsed = MIN(len, wsi->ws->rx_packet_length);
+
+			int diff;
+			if (!wsi->protocol->rx_buffer_size) {
+                diff = wsi->context->pt_serv_buf_size - wsi->ws->rx_ubuf_head;
+            } else {
+                diff = wsi->protocol->rx_buffer_size - wsi->ws->rx_ubuf_head;
+            }
+
+            parsed = MIN(parsed, diff);
+            memcpy(&wsi->ws->rx_ubuf[LWS_PRE + wsi->ws->rx_ubuf_head], buf, parsed);
+
+            wsi->ws->rx_packet_length -= parsed;
+            wsi->ws->rx_ubuf_head += parsed;
+            ebuf.token = &wsi->ws->rx_ubuf[LWS_PRE];
+            ebuf.len = wsi->ws->rx_ubuf_head;
+        }
+
+		if (wsi->ws->this_frame_masked && !wsi->ws->all_zero_nonce) {
+			for (int i = 0; i < ebuf.len; ++i)
+				ebuf.token[i] = wsi->ws->mask[(wsi->ws->mask_idx++) & 3];
+		}
 
 		if (--wsi->ws->rx_packet_length == 0) {
 			/* spill because we have the whole frame */
 			wsi->lws_rx_parse_state = LWS_RXPS_NEW;
 			goto spill;
 		}
-
-		/*
-		 * if there's no protocol max frame size given, we are
-		 * supposed to default to context->pt_serv_buf_size
-		 */
-		if (!wsi->protocol->rx_buffer_size &&
-		    wsi->ws->rx_ubuf_head != wsi->context->pt_serv_buf_size)
-			break;
-
-		if (wsi->protocol->rx_buffer_size &&
-		    wsi->ws->rx_ubuf_head != wsi->protocol->rx_buffer_size)
-			break;
 
 		/* spill because we filled our rx buffer */
 spill:
@@ -487,9 +509,6 @@ ping_drop:
 		if (handled)
 			goto already_done;
 
-		ebuf.token = &wsi->ws->rx_ubuf[LWS_PRE];
-		ebuf.len = wsi->ws->rx_ubuf_head;
-
 #if !defined(LWS_WITHOUT_EXTENSIONS)
 drain_extension:
 		lwsl_ext("%s: passing %d to ext\n", __func__, ebuf.len);
@@ -546,8 +565,6 @@ utf8_fail:
 		if (!ebuf.token)
 			goto already_done;
 
-		ebuf.token[ebuf.len] = '\0';
-
 		if (!wsi->protocol->callback)
 			goto already_done;
 
@@ -585,17 +602,17 @@ utf8_fail:
 
 		/* if user code wants to close, let caller know */
 		if (m)
-			return 1;
+			return -1;
 
 already_done:
 		wsi->ws->rx_ubuf_head = 0;
 		break;
 	default:
 		lwsl_err("client rx illegal state\n");
-		return 1;
+		return -1;
 	}
 
-	return 0;
+	return parsed;
 
 illegal_ctl_length:
 	lwsl_warn("Control frame asking for extended length is illegal\n");
