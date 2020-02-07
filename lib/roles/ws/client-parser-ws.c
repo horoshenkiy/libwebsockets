@@ -331,7 +331,8 @@ int lws_ws_client_rx_sm(struct lws *wsi, unsigned char *buf, size_t len)
 
 			parsed = wsi->ws->rx_packet_length;
 			wsi->ws->rx_packet_length = 0;
-			ebuf.token = (char *) buf;
+            wsi->ws->rx_ubuf_head += parsed;
+            ebuf.token = (char *) buf;
 			ebuf.len = parsed;
 
 		} else {
@@ -358,7 +359,7 @@ int lws_ws_client_rx_sm(struct lws *wsi, unsigned char *buf, size_t len)
 				ebuf.token[i] = wsi->ws->mask[(wsi->ws->mask_idx++) & 3];
 		}
 
-		if (--wsi->ws->rx_packet_length == 0) {
+		if (wsi->ws->rx_packet_length == 0) {
 			/* spill because we have the whole frame */
 			wsi->lws_rx_parse_state = LWS_RXPS_NEW;
 			goto spill;
