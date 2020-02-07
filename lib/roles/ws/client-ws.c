@@ -371,7 +371,9 @@ lws_ws_client_rx_sm(struct lws *wsi, unsigned char *buf, size_t len)
 #endif
 
             /* bulk read */
-            if (wsi->ws->rx_packet_length <= len &&
+            int rx_buf_full = 0;
+            if (wsi->ws->rx_ubuf_head == 0 &&
+                wsi->ws->rx_packet_length <= len &&
                 (wsi->ws->opcode == LWSWSOPC_TEXT_FRAME ||
                  wsi->ws->opcode == LWSWSOPC_BINARY_FRAME ||
                  wsi->ws->opcode == LWSWSOPC_CONTINUATION)) {
@@ -392,9 +394,12 @@ lws_ws_client_rx_sm(struct lws *wsi, unsigned char *buf, size_t len)
                     diff = wsi->protocol->rx_buffer_size - wsi->ws->rx_ubuf_head;
                 }
 
-                parsed = MIN(parsed, diff);
-                memcpy(&wsi->ws->rx_ubuf[LWS_PRE + wsi->ws->rx_ubuf_head], buf, parsed);
+                if (diff < parsed) {
+                    parsed = diff;
+                    rx_buf_full = 1;
+                }
 
+                memcpy(&wsi->ws->rx_ubuf[LWS_PRE + wsi->ws->rx_ubuf_head], buf, parsed);
                 wsi->ws->rx_packet_length -= parsed;
                 wsi->ws->rx_ubuf_head += parsed;
                 ebuf.token = &wsi->ws->rx_ubuf[LWS_PRE];
@@ -409,7 +414,11 @@ lws_ws_client_rx_sm(struct lws *wsi, unsigned char *buf, size_t len)
             if (wsi->ws->rx_packet_length == 0) {
                 /* spill because we have the whole frame */
                 wsi->lws_rx_parse_state = LWS_RXPS_NEW;
+                goto spill;
             }
+
+            if (!rx_buf_full)
+                break;
 
             /* spill because we filled our rx buffer */
         spill:
