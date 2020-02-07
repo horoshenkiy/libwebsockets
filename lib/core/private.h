@@ -1082,8 +1082,8 @@ lws_latency(struct lws_context *context, struct lws *wsi, const char *action,
 static LWS_INLINE int
 lws_has_buffered_out(struct lws *wsi) { return !!wsi->buflist_out; }
 
-LWS_EXTERN int LWS_WARN_UNUSED_RESULT
-lws_ws_client_rx_sm(struct lws *wsi, unsigned char *bufelko, size_t len);
+//LWS_EXTERN int LWS_WARN_UNUSED_RESULT
+//lws_ws_client_rx_sm(struct lws *wsi, unsigned char *bufelko, size_t len);
 
 LWS_EXTERN int LWS_WARN_UNUSED_RESULT
 lws_parse(struct lws *wsi, unsigned char *buf, int *len);

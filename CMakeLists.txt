@@ -881,8 +881,7 @@ if (LWS_ROLE_WS)
 		lib/roles/ws/ops-ws.c)
 	if (NOT LWS_WITHOUT_CLIENT)
 		list(APPEND SOURCES
-			lib/roles/ws/client-ws.c
-			lib/roles/ws/client-parser-ws.c)
+			lib/roles/ws/client-ws.c)
 	endif()
 	if (NOT LWS_WITHOUT_SERVER)
 		list(APPEND SOURCES
